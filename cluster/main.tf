@@ -28,6 +28,10 @@ module "node_group" {
   min_size            = var.min_size
   env                 = var.env
   tags                = local.tags
+
+  depends_on = [
+    module.eks
+  ]
 }
 
 module "add_ons" {

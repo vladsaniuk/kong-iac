@@ -29,7 +29,7 @@ apply: copy-config
 
 destroy-plan: copy-config
 	cd ${ELEMENT} && \
-	terraform plan -destroy -var-file ${ELEMENT}/envs/${ENV}/${ENV}.tfvars -var-file ${ELEMENT}/envs/${ENV}/regions/${REGION}/child.tfvars $(foreach target, ${TARGETS}, -target=${target}) -out=destroy_${ELEMENT}.tfplan
+	terraform plan -destroy -var-file envs/${ENV}/${ENV}.tfvars -var-file envs/${ENV}/regions/${REGION}/child.tfvars $(foreach target, ${TARGETS}, -target=${target}) -out=destroy_${ELEMENT}.tfplan
 
 destroy: copy-config
 	cd ${ELEMENT} && \
@@ -46,7 +46,7 @@ check-vars-import:
 
 import: copy-config check-vars-import
 	cd ${ELEMENT} && \
-	terraform import -var-file ${ELEMENT}/envs/${ENV}/${ENV}.tfvars -var-file ${ELEMENT}/envs/${ENV}/regions/${REGION}/child.tfvars ${IMPORT_TARGET} ${ID}
+	terraform import -var-file envs/${ENV}/${ENV}.tfvars -var-file envs/${ENV}/regions/${REGION}/child.tfvars ${IMPORT_TARGET} ${ID}
 
 help:
 	echo "Required vars are ELEMENT, REGION and TARGETS (space-separated, if more then 1)"

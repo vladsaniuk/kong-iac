@@ -1,6 +1,7 @@
 locals {
   node_class_name = "node-class-${var.env}"
   node_pool_name  = "node-pool-${var.env}"
+  namespace       = "karpenter"
 }
 
 # Get AccID
@@ -74,7 +75,7 @@ resource "aws_iam_role" "karpenter_controller_role" {
         Condition = {
           "StringEquals" : {
             "${replace(var.eks_oidc.oidc[0].issuer_url, "https://", "")}:aud" : "sts.amazonaws.com",
-            "${replace(var.eks_oidc.oidc[0].issuer_url, "https://", "")}:sub" : "system:serviceaccount:karpenter:karpenter"
+            "${replace(var.eks_oidc.oidc[0].issuer_url, "https://", "")}:sub" : "system:serviceaccount:${local.namespace}:karpenter"
           }
         }
       }
@@ -191,36 +192,21 @@ YAML
 }
 
 # Create namespace for Karpenter
-resource "kubernetes_namespace" "karpenter_namespace" {
+resource "kubernetes_namespace_v1" "karpenter_namespace" {
   metadata {
-    name = "karpenter"
+    name = local.namespace
   }
 }
 
 # Install Karpenter with Helm
 resource "helm_release" "karpenter" {
-  name       = "karpenter"
-  namespace  = kubernetes_namespace.karpenter_namespace.metadata[0].name
-  repository = "oci://public.ecr.aws/karpenter"
-  chart      = "karpenter"
-  version    = "v0.33.0"
-
-  values = [
-    <<-EOT
-    affinity:
-      nodeAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          nodeSelectorTerms:
-          - matchExpressions:
-            - key: karpenter.sh/provisioner-name
-              operator: DoesNotExist
-          - matchExpressions:
-            - key: eks.amazonaws.com/nodegroup
-              operator: In
-              values:
-              - node-group-${var.env}-env
-    EOT
-  ]
+  name                = "karpenter"
+  namespace           = kubernetes_namespace_v1.karpenter_namespace.metadata[0].name
+  repository          = "oci://public.ecr.aws/karpenter"
+  repository_username = data.aws_ecrpublic_authorization_token.token.user_name
+  repository_password = data.aws_ecrpublic_authorization_token.token.password
+  chart               = "karpenter"
+  version             = "v0.33.0"
 
   set {
     name  = "settings.aws.defaultInstanceProfile"
@@ -228,7 +214,7 @@ resource "helm_release" "karpenter" {
   }
 
   set {
-    name  = "settings.aws.clusterName"
+    name  = "settings.clusterName"
     value = var.cluster_name
   }
 
@@ -256,11 +242,6 @@ resource "helm_release" "karpenter" {
     name  = "controller.resources.limits.memory"
     value = "512M"
   }
-
-  set {
-    name  = ".template.spec.containers.readinessProbe.initialDelaySeconds"
-    value = "30"
-  }
 }
 
 resource "kubectl_manifest" "node_pool" {
@@ -269,7 +250,7 @@ apiVersion: karpenter.sh/v1beta1
 kind: NodePool
 metadata:
   name: ${local.node_pool_name}
-  namespace: ${kubernetes_namespace.karpenter_namespace.metadata[0].name}
+  namespace: ${kubernetes_namespace_v1.karpenter_namespace.metadata[0].name}
 spec:
   template:
     spec:
@@ -295,6 +276,10 @@ spec:
     consolidateAfter: 30s
     expireAfter: 30m
 YAML
+
+  depends_on = [
+    helm_release.karpenter
+  ]
 }
 
 resource "kubectl_manifest" "node_class" {
@@ -303,7 +288,7 @@ apiVersion: karpenter.k8s.aws/v1beta1
 kind: EC2NodeClass
 metadata:
   name: ${local.node_class_name}
-  namespace: ${kubernetes_namespace.karpenter_namespace.metadata[0].name}
+  namespace: ${kubernetes_namespace_v1.karpenter_namespace.metadata[0].name}
 spec:
   amiFamily: Ubuntu
   role: ${aws_iam_instance_profile.karpenter_node_instance_profile.name}
@@ -314,4 +299,8 @@ spec:
     - tags:
         karpenter.sh/discovery: ${var.cluster_name}
 YAML
+
+  depends_on = [
+    helm_release.karpenter
+  ]
 }

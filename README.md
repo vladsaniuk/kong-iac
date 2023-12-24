@@ -1,51 +1,28 @@
-# AWS EKS IaC
+# Kong CE infrastructure               
+This repo contains code to deploy and manage infrastracture for my Kong CE project.           
+I plan for multi-environment and multi-region, so I use Makefile as a wrapper to manage different aspects of infrastructure as separate Terraform projects, meaning each folder, i.e. cluster, karpenter etc, is Terraform root, that is called by Makefile with variables and backend config distributed by subfolders that corresponds to environment and region.            
 
-This repo contain IaC to spin up EKS cluster.
-It's logically structured into following modules:
-1) network
-2) EKS
-3) EKS add-ons
-4) Node group (EC2)
-5) Fargate profile (serverless)
-6) Karpenter (auto-scaling for Node group)
+## New environment / region bootstrap
+Backend has a special treatment, as it has to be initialized for each new env / region with local tfstate to create required resources to used by all other backends going forward, this is one-off effort:
+```
+cp versions.tf backend/
+terraform init -backend-config=envs/${ENV}/${ENV}.s3.tfbackend -backend-config=envs/${ENV}/regions/${REGION}/child.s3.tfbackend
+terraform plan -var-file envs/${ENV}/${ENV}.tfvars -var-file envs/${ENV}/regions/${REGION}/child.tfvars -out=backend.tfplan
+terraform apply "backend.tfplan"
+```
+At this point you will have tfstate locally and resources created in AWS, now we need to migrate state from local machine to S3:
+`ENV=dev ELEMENT=backend REGION=us-east-1 make init`
 
-It is assumed, that vars cluster_name, region and env will be passed from the pipeline.
+## Deployment order 
+1) cluster
+2) karpenter
+3) lb_controller
+4) kong
 
-Init with backend config file:
-`terraform init -backend-config=backend-dev.hcl`
-
-To execute complete tf code use this snippet, but note that Karpenter module is dependent on EKS module (it use data resource to query cluster details), so it will eventually throw you and error, but it can be used for testing / troubleshooting your syntax:
-
-`terraform plan -var-file dev.tfvars`
-
-To execute specific module use:
-
-`terraform plan -var-file dev.tfvars -target="module.network" -out=dev_network.tfplan`
-
-To apply it:
-
-`terraform apply "dev_network.tfplan"`
-
-Get kubeconfig:
-`aws eks update-kubeconfig --region us-east-1 --name dev_eks-cluster`
-
-To destroy infra, make plan:
-`terraform plan -destroy -var-file dev.tfvars -target="module.network" -out=dev_network-destroy.tfplan`
-
-And apply:
-`terraform apply "dev_network-destroy.tfplan"`
-
-Nginx is a deployment to test Karpenter auto-scaling.
-
-Modules creation sequence:
-* backend
-* network
-* eks
-* node_group
-* add_ons
-* fargate_profile
-* karpenter
-* karpenter_config
-* secrets (will only create objects in SSM Parameters Store with dummy values)
-
-Karpenter module deploys all required roles to aws-auth.
+## Makefile
+Init: `ENV=dev ELEMENT=cluster REGION=us-east-1 make init`
+Plan: `ENV=dev ELEMENT=cluster REGION=us-east-1 make plan`
+Apply: `ENV=dev ELEMENT=cluster REGION=us-east-1 make apply`
+Destroy-plan: `ENV=dev ELEMENT=cluster REGION=us-east-1 make destroy-plan`
+Destroy: `ENV=dev ELEMENT=cluster REGION=us-east-1 make destroy`
+Import: `ENV=dev ELEMENT=cluster REGION=us-east-1 make import aws_instance.example i-12345678`
